@@ -2,6 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8" />
+<meta name="referrer" content="strict-origin-when-cross-origin" />
 <style>
     html, body {
         margin: 0;
@@ -36,14 +37,13 @@
 <div id="player"></div>
 <div id="status">Loading...</div>
 
-<script src="https://www.youtube.com/iframe_api"></script>
 <script>
     const params = new URLSearchParams(window.location.search);
-    const videoId = params.get('v') || 'sSTGfpmGZLk';
+    const videoUrl = params.get('u');
+    const videoId = params.get('v') || 'dQw4w9WgXcQ';
     const startPaused = params.get('p') === '1';
 
-    let player = null;
-    let ready = false;
+    let controller = null;
     let pendingVolume = 100;
     let pendingPaused = startPaused;
 
@@ -51,49 +51,85 @@
         document.getElementById('status').textContent = text;
     }
 
-    setTimeout(() => {
-        if (!player) setStatus('YouTube API failed to load');
-    }, 8000);
+    function clampVolume(v) {
+        return Math.max(0, Math.min(100, v));
+    }
 
-    function onYouTubeIframeAPIReady() {
-        player = new YT.Player('player', {
-        width: '100%',
-        height: '100%',
-        videoId: videoId,
-        playerVars: {
-            autoplay: startPaused ? 0 : 1,
-            controls: 0,
-            disablekb: 1,
-            fs: 0,
-            modestbranding: 1,
-            rel: 0,
-            playsinline: 1,
-            loop: 1,
-            playlist: videoId,
-            origin: 'https://artcounty.net',
-            widget_referrer: 'https://artcounty.net'
-        },
-        events: {
-            onError: (event) => {
-                setStatus('YouTube error ' + event.data);
-            },
-            onStateChange: (event) => {
-                if (event.data === 1) setStatus('');
-            },
-            onReady: (event) => {
-                ready = true;
-                setStatus('Player ready');
-
-                event.target.setVolume(pendingVolume);
-
-                if (pendingPaused) {
-                    event.target.pauseVideo();
-                } else {
-                    event.target.playVideo();
-                }
-            }
+    function applyPending() {
+        if (!controller) return;
+        controller.setVolume(pendingVolume);
+        if (pendingPaused) {
+            controller.pause();
+        } else {
+            controller.play();
         }
-    });
+    }
+
+    function startVideoFile() {
+        const el = document.createElement('video');
+        el.src = videoUrl;
+        el.loop = true;
+        el.playsInline = true;
+        el.style.cssText = 'width:100%;height:100%;object-fit:contain;background:#000';
+        el.addEventListener('playing', () => setStatus(''));
+        el.addEventListener('error', () => setStatus('Video error - check the link'));
+        document.getElementById('player').appendChild(el);
+
+        controller = {
+            setVolume: (v) => { el.volume = clampVolume(v) / 100; },
+            pause: () => el.pause(),
+            play: () => {
+                const p = el.play();
+                if (p) p.catch(() => setStatus('Autoplay blocked'));
+            },
+        };
+        applyPending();
+    }
+
+    function startYouTube() {
+        window.onYouTubeIframeAPIReady = () => {
+            const player = new YT.Player('player', {
+                width: '100%',
+                height: '100%',
+                videoId: videoId,
+                playerVars: {
+                    autoplay: startPaused ? 0 : 1,
+                    controls: 0,
+                    disablekb: 1,
+                    fs: 0,
+                    modestbranding: 1,
+                    rel: 0,
+                    playsinline: 1,
+                    loop: 1,
+                    playlist: videoId,
+                },
+                events: {
+                    onError: (event) => {
+                        setStatus('YouTube error ' + event.data);
+                    },
+                    onStateChange: (event) => {
+                        if (event.data === 1) setStatus('');
+                    },
+                    onReady: () => {
+                        setStatus('Player ready');
+                        controller = {
+                            setVolume: (v) => player.setVolume(clampVolume(v)),
+                            pause: () => player.pauseVideo(),
+                            play: () => player.playVideo(),
+                        };
+                        applyPending();
+                    },
+                },
+            });
+        };
+
+        const tag = document.createElement('script');
+        tag.src = 'https://www.youtube.com/iframe_api';
+        document.head.appendChild(tag);
+
+        setTimeout(() => {
+            if (!controller) setStatus('YouTube API failed to load');
+        }, 8000);
     }
 
     window.addEventListener('message', (event) => {
@@ -109,26 +145,21 @@
 
         if (data.type === 'volume') {
             pendingVolume = Math.round(data.volume * 100);
+            if (controller) controller.setVolume(pendingVolume);
         } else if (data.type === 'pause') {
             pendingPaused = true;
+            if (controller) controller.pause();
         } else if (data.type === 'resume') {
             pendingPaused = false;
-        }
-
-        if (!ready) return;
-
-        switch (data.type) {
-            case 'volume':
-                player.setVolume(pendingVolume);
-                break;
-            case 'pause':
-                player.pauseVideo();
-                break;
-            case 'resume':
-                player.playVideo();
-                break;
+            if (controller) controller.play();
         }
     });
+
+    if (videoUrl) {
+        startVideoFile();
+    } else {
+        startYouTube();
+    }
 </script>
 </body>
 </html>
