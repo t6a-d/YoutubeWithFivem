@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+    html, body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        background: #000;
+        overflow: hidden;
+    }
+    #player {
+        width: 100%;
+        height: 100%;
+    }
+    #status {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #fff;
+        font: 48px sans-serif;
+        text-align: center;
+        z-index: 10;
+        pointer-events: none;
+    }
+</style>
+</head>
+<body>
+<div id="player"></div>
+<div id="status">Loading...</div>
+
+<script src="https://www.youtube.com/iframe_api"></script>
+<script>
+    const params = new URLSearchParams(window.location.search);
+    const videoId = params.get('v') || 'sSTGfpmGZLk';
+    const startPaused = params.get('p') === '1';
+
+    let player = null;
+    let ready = false;
+    let pendingVolume = 100;
+    let pendingPaused = startPaused;
+
+    function setStatus(text) {
+        document.getElementById('status').textContent = text;
+    }
+
+    setTimeout(() => {
+        if (!player) setStatus('YouTube API failed to load');
+    }, 8000);
+
+    function onYouTubeIframeAPIReady() {
+        player = new YT.Player('player', {
+        width: '100%',
+        height: '100%',
+        videoId: videoId,
+        playerVars: {
+            autoplay: startPaused ? 0 : 1,
+            controls: 0,
+            disablekb: 1,
+            fs: 0,
+            modestbranding: 1,
+            rel: 0,
+            playsinline: 1,
+            loop: 1,
+            playlist: videoId,
+            origin: 'https://artcounty.net',
+            widget_referrer: 'https://artcounty.net'
+        },
+        events: {
+            onError: (event) => {
+                setStatus('YouTube error ' + event.data);
+            },
+            onStateChange: (event) => {
+                if (event.data === 1) setStatus('');
+            },
+            onReady: (event) => {
+                ready = true;
+                setStatus('Player ready');
+
+                event.target.setVolume(pendingVolume);
+
+                if (pendingPaused) {
+                    event.target.pauseVideo();
+                } else {
+                    event.target.playVideo();
+                }
+            }
+        }
+    });
+    }
+
+    window.addEventListener('message', (event) => {
+        let data = event.data;
+        if (typeof data === 'string') {
+            try {
+                data = JSON.parse(data);
+            } catch (e) {
+                return;
+            }
+        }
+        if (!data || !data.type) return;
+
+        if (data.type === 'volume') {
+            pendingVolume = Math.round(data.volume * 100);
+        } else if (data.type === 'pause') {
+            pendingPaused = true;
+        } else if (data.type === 'resume') {
+            pendingPaused = false;
+        }
+
+        if (!ready) return;
+
+        switch (data.type) {
+            case 'volume':
+                player.setVolume(pendingVolume);
+                break;
+            case 'pause':
+                player.pauseVideo();
+                break;
+            case 'resume':
+                player.playVideo();
+                break;
+        }
+    });
+</script>
+</body>
+</html>
